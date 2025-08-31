@@ -164,3 +164,4 @@ def LinearRegressionSlope(df, clen=50, slen=5, glen=13, src_col="Close"):
 
 
 
+
