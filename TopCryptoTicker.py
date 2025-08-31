@@ -55,7 +55,7 @@ class Get_Tickers:
                 ticker_symbol.append(symbol)
 
             print(ticker_symbol)
-            return results
+            return [results,ticker_symbol]
 
         else:
             print(f"Error:{response.status_code}")

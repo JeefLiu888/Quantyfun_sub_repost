@@ -1,0 +1,23 @@
+Quant project/
+│
+├── indicators/                 # 第一层：指标计算
+│   ├── __init__.py
+│   ├── utbot.py
+│   ├── rsi.py
+│   ├── atr.py
+    └── ...
+│
+├── logic/                        # 第二层：信号组合逻辑
+│   ├── __init__.py
+│   └── combine.py
+│
+├── strategies/                  # 第三层：回测封装
+│   ├── __init__.py
+│   └── strategy_base.py
+│
+└── main.py                          # 主入口
+│
+├── Momentum factors/                  # 之后再说
+│   ├── __init__.py
+│   └── strategy_base.py
+│

@@ -3,16 +3,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import yfinance as yf
 import requests
-from datetime import date
+import datetime
+import mplfinance as mpf
+from datetime import date, timedelta
 from dotenv import load_dotenv
+from lifelines.fitters.npmle import interval
 from sklearn.preprocessing import StandardScaler
-from backtesting import Strategy
-from backtesting.lib import FractionalBacktest
-from TopCryptoTicker import Get_Tickers
+from backtesting import Backtest, Strategy
 import ta
+import sqlite3
 
-
-
+import trend_strength_index
+from TopCryptoTicker import Get_Tickers
+from strategies import MyStrategy
+import Basic_indicator
 
 pd.set_option('display.max_columns', None)
 load_dotenv(fr"C:\Users\ljfgk\Desktop\telebot.env")
@@ -28,9 +32,8 @@ top_n_tickers = Get_Tickers().get_top_n_tickers_exclude_stablecoins(top_n)
 #############################  Load the basic dataset #################################################################
 
 #here with yfinance, free, but with many restrictions
-
-def load_data(ticker_name, start, end, time_internal):
-    df = yf.download(ticker_name, start=start, end=end, interval=time_internal, progress=False)
+def load_data(ticker_name, start, end, interval):
+    df = yf.download(ticker_name+'-USD', start=start, end=end, interval=interval, progress=False, auto_adjust=False)
 
     if df.empty:
         print("Error! Can't reach data!")
@@ -48,117 +51,102 @@ def load_data(ticker_name, start, end, time_internal):
         return pd.DataFrame()
 
     df["OHLC"] = (df["Close"] + df["High"] + df["Low"] + df["Open"]) / 4
+
+    df.to_csv(fr'{ticker_name}_data.csv')
     return df
-########################################################################################################################
 
 
+
+test_ticker = 'BTC'
+
+test_df = load_data(test_ticker, start= '2023-01-01', end = date.today(), interval= '1d')
+test_df.to_csv(f'test_df_{test_ticker}')
+
+
+Basic_indicator.UT_BOT_alerts(test_df,a=2,atr_period=1,use_heikin= False)
+Basic_indicator.ADX(test_df,14,14)
+
+trend_strength_index.AroonOscillator(test_df)
+trend_strength_index.MACD(test_df)
+
+test_df.to_csv('test_df_result.csv')
+#print(test_df)
 
 
 
 '''
-def calc_factors(df):
-    df = df.copy()
-    df["ret_7d"] = df["Close"].pct_change(7)
-    df["ret_30d"] = df["Close"].pct_change(30)
-    df["volatility_30d"] = df["Close"].pct_change().rolling(30).std()
-    df["volume_change_7d"] = df["Volume"].pct_change(7)
-    df["nvt_proxy"] = df["Close"] / (df["Volume"] + 1e-9)
-    return df
+adx_plot = mpf.make_addplot(test_df['adx'], panel=1, color='red', ylabel='ADX')
+mpf.plot(
+    test_df,
+    type='candle',
+    addplot=adx_plot,
+    volume=False,
+    style='yahoo',
+    title='K线与ADX',
+    mav=(),           # 可选: 添加均线
+    figratio=(12,8)   # 图宽高比
+)
+'''
 
 
-def normalize_factors(df, factor_list):
-    scaler = StandardScaler()
-    df[factor_list] = scaler.fit_transform(df[factor_list])
-    return df
 
-
-def add_multi_factor_score(df):
-    df = calc_factors(df)
-    factor_list = ["ret_7d", "ret_30d", "volatility_30d", "volume_change_7d", "nvt_proxy"]
-    df = normalize_factors(df, factor_list)
-
-    weights = {"ret_7d": 0.3,
-               "ret_30d": 0.3,
-               "volatility_30d": -0.2,
-               "volume_change_7d": 0.1,
-               "nvt_proxy": -0.1}
-
-    df["score"] = sum(df[f] * w for f, w in weights.items())
-    return df
-
-
-class MultiFactorStrategy(Strategy):
-    def init(self):
-        self.scores = self.I(lambda: self.data.df["score"])
-
-    def next(self):
-        score = self.scores[-1]
-        if score > 0:
-            if not self.position.is_long:
-                self.position.close()
-                self.buy()
-        else:
-            if not self.position.is_short:
-                self.position.close()
-                self.sell()
-
+'''
+# WTF 神了个大奇 yfinance获取数据居然缺了一天， 25年8月6号直接消失了 我日
+Basic_indicator.ATR(load_data('BTC', start='2023-01-01', end= date.today(), interval='1d'),14, smoothing='EMA')
+Basic_indicator.ut_bot_alerts(load_data('BTC', start='2023-01-01', end= date.today(), interval='1d'),1.5, 14, True )
 '''
 
 
 
 
+'''
 
+########################### backtest test ##############################
+test_df = pd.read_csv('test_df_result.csv')
+test_df['Date'] = pd.to_datetime(test_df['Date'])
+test_df.set_index('Date', inplace=True)
+test_df['buy_signal'] = test_df['ut_bot_buy_signal'].astype(bool)
+test_df['sell_signal'] = test_df['ut_bot_sell_signal'].astype(bool)
+
+
+
+################# test strategy ######################
+bt = Backtest(
+    test_df,
+    MyStrategy,
+    cash=1000000,
+    commission=0.001,
+    exclusive_orders=True
+)
+stats = bt.run()
+print(stats)
+bt.plot()
 
 '''
+
+'''
+################# strategy optimization ###########################
+a_values = np.arange(1, 3.1, 0.1)        # 一维浮点数组
+atr_period_values = list(range(10, 20)) # 一维整数列表
+
+print(type(a_values), a_values.shape)
+print(type(atr_period_values), len(atr_period_values))
+
+
+
+stats = bt.optimize(
+    a=a_values.tolist(),
+    atr_period=atr_period_values,
+    maximize='Sharpe Ratio'
+)
+
+print(stats)
+bt.plot()
+
+'''
+
+
 if __name__ == "__main__":
-    start = "2023-01-01"
-    end = str(date.today())
-    ticker = "BTC-USD"
+    print('ff15')
 
-    df = load_data(ticker, start, end, "1d")
-    df = add_multi_factor_score(df)
 
-    bt = FractionalBacktest(df, MultiFactorStrategy, cash=10000, commission=0.001)
-    stats = bt.run()
-
-    # 定义资金曲线变量
-    df_bt = bt._results._equity_curve
-
-    bt.plot()
-
-    trades = stats._trades
-
-    if not trades.empty:
-        buy_trades = trades[trades['Size'] > 0]
-        sell_trades = trades[trades['Size'] < 0]
-
-        plt.figure(figsize=(12, 6))
-        plt.plot(df.index, df['Close'], label="BTC Close Price", color="gray")
-
-        plt.scatter(buy_trades['EntryTime'], buy_trades['EntryPrice'], marker='^', color='green', s=100, label="Buy")
-        plt.scatter(sell_trades['ExitTime'], sell_trades['ExitPrice'], marker='v', color='red', s=100, label="Sell")
-
-        plt.legend()
-        plt.title("BTC Close Price with Buy/Sell Signals")
-        plt.show()
-    else:
-        print("No trades generated, skipping trade plot.")
-
-    print(stats)
-    
-'''
-
-'''
-def OI_checker_binance(ticker):
-    url = "https://fapi.binance.com/fapi/v1/openInterest"
-
-    def get_open_interest(ticker):
-        params = {"symbol": ticker}
-        response = requests.get(url, params=params)
-        data = response.json()
-        if "openInterest" in data:
-            return float(data["openInterest"])
-        else:
-            print("Error:", data)
-            return None
-'''

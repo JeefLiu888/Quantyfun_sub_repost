@@ -6,8 +6,8 @@ import requests
 from datetime import date
 from dotenv import load_dotenv
 from sklearn.preprocessing import StandardScaler
-from backtesting import Strategy
-from backtesting.lib import FractionalBacktest
+from backtest import Strategy
+from backtest.lib import FractionalBacktest
 from main import calc_factors
 from TopCryptoTicker import Get_Tickers
 
