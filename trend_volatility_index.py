@@ -1,0 +1,377 @@
+import pandas as pd
+import numpy as np
+
+
+
+
+
+
+def ema(series, period):
+    return series.ewm(span=period, adjust=False).mean()
+
+def sma(series, period):
+    return series.rolling(window=period).mean()
+
+
+
+
+
+def ADX(df, di_len=14, adx_period=14):
+    """
+    :param df: 必须包含 ['high', 'low', 'close'] 列的 pandas DataFrame
+    :param di_len: DI Length
+    :param adx_len: ADX Smoothing Length
+    """
+
+    # True Range
+    df['prev_close'] = df['Close'].shift(1)
+    df['tr'] = np.maximum(df['High'] - df['Low'],
+                          np.maximum(abs(df['High'] - df['prev_close']),
+                                     abs(df['Low'] - df['prev_close'])))
+
+    # Up Move & Down Move
+    df['up_move'] = df['High'] - df['High'].shift(1)
+    df['down_move'] = df['Low'].shift(1) - df['Low']
+
+    # PlusDM & MinusDM
+    df['plus_dm'] = np.where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), df['up_move'], 0.0)
+    df['minus_dm'] = np.where((df['down_move'] > df['up_move']) & (df['down_move'] > 0), df['down_move'], 0.0)
+
+
+    # RMA = Wilder's smoothing
+    def rma(series, period):
+        rma = series.rolling(window=period).mean()
+        rma.iloc[period:] = np.nan
+        rma.iloc[period-1] = series.iloc[:period].mean()  # first value
+        for i in range(period, len(series)):
+            rma.iloc[i] = (rma.iloc[i-1] * (period - 1) + series.iloc[i]) / period
+        return rma
+
+    # Smoothed DI
+    tr_rma = rma(df['tr'], di_len)
+    plus_rma = rma(df['plus_dm'], di_len)
+    minus_rma = rma(df['minus_dm'], di_len)
+
+    df['plus_di'] = 100 * plus_rma / tr_rma
+    df['minus_di'] = 100 * minus_rma / tr_rma
+
+    # ADX
+    dx = (abs(df['plus_di'] - df['minus_di']) /
+          (df['plus_di'] + df['minus_di']).replace(0, np.nan)) * 100
+    df['adx'] = rma(dx, adx_period)
+
+    # 清理临时列
+    df.drop(['prev_close', 'tr', 'up_move', 'down_move', 'plus_dm', 'minus_dm'], axis=1, inplace=True)
+
+    return df
+
+
+def AroonOscillator(df, length=14):
+    """
+    :param df: 必须包含 ['High', 'Low'] 列的 pandas DataFrame
+    :param length: 窗口长度 (默认 14)
+    """
+
+    def highestbars(arr, period):
+        # 找到过去 period 根K线中最高点距离当前的bar数
+        return arr.rolling(period).apply(lambda x: period - 1 - np.argmax(x), raw=True)
+
+    def lowestbars(arr, period):
+        # 找到过去 period 根K线中最低点距离当前的bar数
+        return arr.rolling(period).apply(lambda x: period - 1 - np.argmin(x), raw=True)
+
+    # Aroon upper and lower
+    upper = 100 * (highestbars(df['High'], length + 1) + length) / length
+    lower = 100 * (lowestbars(df['Low'], length + 1) + length) / length
+
+
+    df['aroon_osc'] = upper - lower
+
+    return df
+
+
+
+
+
+def MACD(df, fast_length=12, slow_length=26, signal_length=9,
+         ma_source="EMA", ma_signal="EMA"):
+    """
+
+    :param df: 必须包含 ['Close'] 列的 pandas DataFrame
+    :param fast_length:快均线周期 (默认 12)
+    :param slow_length:慢均线周期 (默认 26)
+    :param signal_length: 信号线周期 (默认 9)
+    :param ma_source: "EMA" 或 "SMA"，用于 fast/slow 均线
+    :param ma_signal:"EMA" 或 "SMA"，用于信号线
+    :return: 修改后的df 含有macd的信息
+    """
+
+    # 选择均线类型
+    ma_func_source = ema if ma_source.upper() == "EMA" else sma
+    ma_func_signal = ema if ma_signal.upper() == "EMA" else sma
+
+    # 计算 MACD
+    fast_ma = ma_func_source(df['Close'], fast_length)
+    slow_ma = ma_func_source(df['Close'], slow_length)
+
+    df['macd'] = fast_ma - slow_ma
+    df['macd_signal'] = ma_func_signal(df['macd'], signal_length)
+    df['macd_hist'] = df['macd'] - df['macd_signal']
+
+    return df
+
+
+
+def LinearRegressionSlope(df, clen=50, slen=5, glen=13, src_col="Close"):
+    '''
+    计算 Linear Regression Slope (UCS-LRS) 指标，并并入 df
+    :param df:必须包含 [src_col] 的 pandas DataFrame
+    :param clen:回归曲线长度 (默认 50)
+    :param slen: Slope 平滑周期 (默认 5, EMA)
+    :param glen:Signal 平滑周期 (默认 13, SMA)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return:
+    '''
+
+    src = df[src_col]
+
+    # === Linear Regression Curve (lrc) ===
+    def linreg(series):
+        y = series.values
+        x = np.arange(len(y))
+        x_mean, y_mean = x.mean(), y.mean()
+        # slope & intercept
+        m = np.sum((x - x_mean) * (y - y_mean)) / np.sum((x - x_mean) ** 2)
+        b = y_mean - m * x_mean
+        return m * x[-1] + b  # 预测最后一点的拟合值
+
+    df['lrc'] = src.rolling(clen).apply(linreg, raw=False)
+
+    #Linear Regression Slope
+    df['lrs'] = df['lrc'] - df['lrc'].shift(1)
+
+    # Smooth LRS(EMA)
+    df['slrs'] = df['lrs'].ewm(span=slen, adjust=False).mean()
+
+    #Signal line(SMA)
+    df['alrs'] = df['slrs'].rolling(window=glen).mean()
+
+    return df
+
+
+def HurstExponent(df, period=100, src_col="Close"):
+    '''
+    计算Hurst指数 - 测量时间序列的长期记忆性
+    :param df: 必须包含 [src_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 100)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return: df
+    H > 0.5：趋势性市场，价格具有持续性
+    H = 0.5：随机游走，震荡市场
+    H < 0.5：均值回归，强震荡市场
+    '''
+    src = df[src_col]
+
+    def calculate_hurst(series):
+        if len(series) < 10:
+            return np.nan
+
+        lags = range(2, min(20, len(series) // 2))
+        tau = [np.sqrt(np.std(np.subtract(series[lag:], series[:-lag]))) for lag in lags]
+
+        # 线性回归计算Hurst指数
+        log_lags = np.log(lags)
+        log_tau = np.log(tau)
+
+        if len(log_tau) < 3:
+            return np.nan
+
+        slope, _ = np.polyfit(log_lags, log_tau, 1)
+        return slope
+
+    df['hurst'] = src.rolling(period).apply(calculate_hurst, raw=False)
+    return df
+
+
+def ATR(df, period=14, high_col="High", low_col="Low", close_col="Close"):
+    '''
+    计算Average True Range (ATR)
+    :param df: 必须包含 [high_col, low_col, close_col] 的 pandas DataFrame
+    :param period: ATR周期 (默认 14)
+    :return: df
+    ATR上升：波动性增加，可能趋势开始或加速
+    ATR下降：波动性减少，可能进入震荡或趋势结束
+    ATR突破历史高位：强趋势信号
+    '''
+    high = df[high_col]
+    low = df[low_col]
+    close = df[close_col]
+
+    # True Range计算
+    tr1 = high - low
+    tr2 = np.abs(high - close.shift(1))
+    tr3 = np.abs(low - close.shift(1))
+
+    df['tr'] = np.maximum(tr1, np.maximum(tr2, tr3))
+    df['atr'] = df['tr'].rolling(period).mean()
+
+    return df
+
+
+def BollingerBandWidth(df, period=20, std_dev=2, src_col="Close"):
+    '''
+    计算布林带宽度
+    :param df: 必须包含 [src_col] 的 pandas DataFrame
+    :param period: 移动平均周期 (默认 20)
+    :param std_dev: 标准差倍数 (默认 2)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return: df
+    bb_width收缩：震荡整理，准备突破
+    bb_width扩张：趋势开始或加速
+    bb_percent：价格在布林带中的位置
+    '''
+    src = df[src_col]
+
+    sma = src.rolling(period).mean()
+    std = src.rolling(period).std()
+
+    df['bb_upper'] = sma + (std * std_dev)
+    df['bb_lower'] = sma - (std * std_dev)
+    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / sma
+    df['bb_percent'] = (src - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+
+    return df
+
+
+def DonchianChannelWidth(df, period=20, high_col="High", low_col="Low", close_col="Close"):
+    '''
+    计算Donchian Channel宽度
+    :param df: 必须包含 [high_col, low_col, close_col] 的 pandas DataFrame
+    :param period: 通道周期 (默认 20)
+    :return: df
+    通道宽度扩张：趋势开始
+    通道宽度收缩：震荡整理
+    价格突破通道：趋势确认
+    '''
+    high = df[high_col]
+    low = df[low_col]
+    close = df[close_col]
+
+    df['dc_upper'] = high.rolling(period).max()
+    df['dc_lower'] = low.rolling(period).min()
+    df['dc_middle'] = (df['dc_upper'] + df['dc_lower']) / 2
+    df['dc_width'] = (df['dc_upper'] - df['dc_lower']) / close
+    df['dc_percent'] = (close - df['dc_lower']) / (df['dc_upper'] - df['dc_lower'])
+
+    return df
+
+
+def KeltnerChannelWidth(df, period=20, atr_period=14, multiplier=2,
+                        high_col="High", low_col="Low", close_col="Close"):
+    '''
+    计算Keltner Channel宽度
+    :param df: 必须包含 [high_col, low_col, close_col] 的 pandas DataFrame
+    :param period: EMA周期 (默认 20)
+    :param atr_period: ATR周期 (默认 14)
+    :param multiplier: ATR倍数 (默认 2)
+    :return: df
+    '''
+    close = df[close_col]
+
+    # 计算ATR
+    df = ATR(df, atr_period, high_col, low_col, close_col)
+
+    ema = close.ewm(span=period).mean()
+    df['kc_upper'] = ema + (df['atr'] * multiplier)
+    df['kc_lower'] = ema - (df['atr'] * multiplier)
+    df['kc_width'] = (df['kc_upper'] - df['kc_lower']) / close
+    df['kc_percent'] = (close - df['kc_lower']) / (df['kc_upper'] - df['kc_lower'])
+
+    return df
+
+
+def HistoricalVolatility(df, period=20, annualize=252, src_col="Close"):
+    '''
+    计算历史波动率
+    :param df: 必须包含 [src_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 20)
+    :param annualize: 年化因子 (默认 252)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return: df
+    波动率上升：市场不确定性增加，可能转向趋势
+    波动率下降：市场平静，震荡概率大
+    波动率突破：重要的制度转换信号
+    '''
+    src = df[src_col]
+
+    # 对数收益率
+    log_returns = np.log(src / src.shift(1))
+
+    # 历史波动率
+    df['hist_vol'] = log_returns.rolling(period).std() * np.sqrt(annualize)
+    df['parkinson_vol'] = np.sqrt(np.log(df.get('High', src) / df.get('Low', src)) ** 2)
+
+    return df
+
+
+def YangZhangVolatility(df, period=20, high_col="High", low_col="Low",
+                        open_col="Open", close_col="Close"):
+    '''
+    计算Yang-Zhang波动率估计量
+    :param df: 必须包含 [high_col, low_col, open_col, close_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 20)
+    :return: df
+    同上historicalvolatility
+    '''
+    high = df[high_col]
+    low = df[low_col]
+    open_price = df[open_col]
+    close = df[close_col]
+
+    # Yang-Zhang组件
+    overnight = np.log(open_price / close.shift(1))
+    rs = np.log(high / close) * np.log(high / open_price) + np.log(low / close) * np.log(low / open_price)
+
+    df['yz_vol'] = np.sqrt(overnight.rolling(period).var() + rs.rolling(period).mean())
+
+    return df
+
+
+def GARCH_Volatility(df, period=50, p=1, q=1, src_col="Close"):
+    '''
+    简化的GARCH(1,1)波动率预测
+    注意：这是简化版本，真正的GARCH需要专门的库如arch
+    :param df: 必须包含 [src_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 50)
+    :param p: GARCH的p参数 (默认 1)
+    :param q: GARCH的q参数 (默认 1)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return: df
+    '''
+    src = df[src_col]
+
+    # 计算收益率
+    returns = src.pct_change().dropna()
+
+    def simple_garch(ret_series, alpha=0.1, beta=0.85, omega=0.05):
+        if len(ret_series) < 10:
+            return np.nan
+
+        # 初始化条件方差
+        sigma2 = ret_series.var()
+        garch_var = [sigma2]
+
+        for i in range(1, len(ret_series)):
+            # GARCH(1,1): sigma2_t = omega + alpha*r2_{t-1} + beta*sigma2_{t-1}
+            sigma2 = omega + alpha * (ret_series.iloc[i - 1] ** 2) + beta * sigma2
+            garch_var.append(sigma2)
+
+        return np.sqrt(garch_var[-1])  # 返回最后一期的波动率
+
+    df['garch_vol'] = returns.rolling(period).apply(simple_garch, raw=False)
+    return df
+
+
+
+
+

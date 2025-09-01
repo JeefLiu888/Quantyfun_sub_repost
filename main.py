@@ -13,7 +13,7 @@ from backtesting import Backtest, Strategy
 import ta
 import sqlite3
 
-import trend_strength_index
+import trend_volatility_index
 from TopCryptoTicker import Get_Tickers
 from strategies import MyStrategy
 import Basic_indicator
