@@ -214,4 +214,66 @@ def ZigzagAmplitude(df, threshold_pct=5, src_col="Close"):
     return df
 
 
+def ElliottWaveCount(df, period=100, src_col="Close"):
+    '''
+    简化的Elliott波浪计数 - 基于价格摆动
+    :param df: 必须包含 [src_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 100)
+    :param src_col: 用于计算的价格列 (默认 'Close')
+    :return: df
+    '''
+    src = df[src_col]
+
+    def elliott_pattern_score(series):
+        if len(series) < 50:
+            return np.nan
+
+        # 寻找波峰波谷
+        from scipy.signal import find_peaks
+
+        # 寻找局部最大值和最小值
+        peaks, _ = find_peaks(series.values, distance=5)
+        valleys, _ = find_peaks(-series.values, distance=5)
+
+        # 合并并排序关键点
+        turning_points = np.concatenate([peaks, valleys])
+        turning_points.sort()
+
+        if len(turning_points) < 5:
+            return 0
+
+        # 分析波浪长度比率
+        wave_lengths = []
+        for i in range(1, min(6, len(turning_points))):  # 最多看前5波
+            start_idx = turning_points[i - 1]
+            end_idx = turning_points[i]
+            wave_length = abs(series.iloc[end_idx] - series.iloc[start_idx])
+            wave_lengths.append(wave_length)
+
+        if len(wave_lengths) < 3:
+            return 0
+
+        # 检查是否符合Elliott波浪比率
+        # 第3波通常是最长的，第2波和第4波相对较短
+        elliott_score = 0
+
+        # 简化的评分系统
+        if len(wave_lengths) >= 3:
+            # 第3波 > 第1波
+            if wave_lengths[2] > wave_lengths[0]:
+                elliott_score += 0.3
+
+            # 第2波和第4波相对较小
+            if len(wave_lengths) >= 4:
+                avg_impulse = (wave_lengths[0] + wave_lengths[2]) / 2
+                if wave_lengths[1] < avg_impulse * 0.8:
+                    elliott_score += 0.2
+                if wave_lengths[3] < avg_impulse * 0.8:
+                    elliott_score += 0.2
+
+        return elliott_score
+
+    df['elliott_wave_score'] = src.rolling(period).apply(elliott_pattern_score, raw=False)
+    return df
+
 

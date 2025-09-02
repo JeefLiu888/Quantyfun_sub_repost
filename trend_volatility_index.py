@@ -2,19 +2,11 @@ import pandas as pd
 import numpy as np
 
 
-
-
-
-
 def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 def sma(series, period):
     return series.rolling(window=period).mean()
-
-
-
-
 
 def ADX(df, di_len=14, adx_period=14):
     """
@@ -90,9 +82,6 @@ def AroonOscillator(df, length=14):
     return df
 
 
-
-
-
 def MACD(df, fast_length=12, slow_length=26, signal_length=9,
          ma_source="EMA", ma_signal="EMA"):
     """
@@ -119,7 +108,6 @@ def MACD(df, fast_length=12, slow_length=26, signal_length=9,
     df['macd_hist'] = df['macd'] - df['macd_signal']
 
     return df
-
 
 
 def LinearRegressionSlope(df, clen=50, slen=5, glen=13, src_col="Close"):
@@ -372,6 +360,131 @@ def GARCH_Volatility(df, period=50, p=1, q=1, src_col="Close"):
     return df
 
 
+
+#################### TA 继续处理 ###########################33
+
+# ---------- helpers ----------
+def rolling_zscore(series, window, min_periods=None):
+    if min_periods is None:
+        min_periods = window
+    mean = series.rolling(window, min_periods=min_periods).mean()
+    std = series.rolling(window, min_periods=min_periods).std(ddof=0)
+    return (series - mean) / (std + 1e-9)
+
+def rolling_pct_rank(series, window, min_periods=None):
+    if min_periods is None:
+        min_periods = window
+    return series.rolling(window, min_periods=min_periods).apply(
+        lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False)
+
+def bars_since_event(event_series):
+    """
+    返回从上次事件发生到当前 bar 的距离（事件当日 = 0）。
+    如果历史上从未发生过事件，返回 i+1（即从序列开始算起的距离）。
+    说明：用纯 numpy 循环实现，直观且不易出边界 bug。
+    """
+    s = event_series.astype(bool).values
+    out = np.empty(len(s), dtype=int)
+    last = -1
+    for i, v in enumerate(s):
+        if v:
+            last = i
+            out[i] = 0
+        else:
+            out[i] = i - last if last != -1 else i + 1
+    return pd.Series(out, index=event_series.index)
+
+# ---------- build_features ----------
+def build_features(df,
+                   macd_fast=12, macd_slow=26, macd_signal=9,
+                   adx_len=14, adx_smooth=14,
+                   atr_len=14,
+                   bb_len=20, bb_std=2,
+                   dc_len=20, kc_len=20,
+                   z_windows=(50, 100)):
+
+    df = df.copy()
+
+    # 1) 计算你已有的基础指标（确保这些函数在脚本中已定义并使用相同列名）
+    df = ADX(df, di_len=adx_len, adx_period=adx_smooth)
+    df = MACD(df, fast_length=macd_fast, slow_length=macd_slow, signal_length=macd_signal)
+    df = ATR(df, period=atr_len)
+    df = BollingerBandWidth(df, period=bb_len, std_dev=bb_std)
+    df = DonchianChannelWidth(df, period=dc_len)
+    df = KeltnerChannelWidth(df, period=kc_len, atr_period=atr_len)
+    df = HurstExponent(df, period=100)
+    df = LinearRegressionSlope(df)
+    df = HistoricalVolatility(df)
+
+    # 2) ATR 归一（把一些尺度不一的指标换到同一波动率尺度）
+    for col in ["macd", "macd_signal", "macd_hist", "lrs", "slrs", "alrs"]:
+        if (col in df.columns) and ('atr' in df.columns):
+            df[f"{col}_atr_norm"] = df[col] / (df['atr'] + 1e-9)
+
+    # 3) MACD 衍生特征（动量与事件型）
+    if {'macd', 'macd_signal', 'macd_hist'}.issubset(df.columns):
+        df['macd_gap'] = df['macd'] - df['macd_signal']                    # 差距（力度）
+        df['macd_gap_atr'] = df['macd_gap'] / (df['atr'] + 1e-9)           # 相对波动率下的力度
+        df['d_macd'] = df['macd'].diff()                                   # 一阶差分（斜率）
+        df['d_macd_hist'] = df['macd_hist'].diff()                         # hist 的一阶差分（加速/减速）
+
+        df['macd_cross_up'] = ((df['macd'] > df['macd_signal']) &
+                               (df['macd'].shift(1) <= df['macd_signal'].shift(1))).astype(int)
+        df['macd_cross_down'] = ((df['macd'] < df['macd_signal']) &
+                                 (df['macd'].shift(1) >= df['macd_signal'].shift(1))).astype(int)
+
+        df['bars_since_macd_cross_up'] = bars_since_event(df['macd_cross_up'] == 1)
+        df['bars_since_macd_cross_down'] = bars_since_event(df['macd_cross_down'] == 1)
+        df['macd_above_zero'] = (df['macd'] > 0).astype(int)
+
+    # 4) ADX 特征
+    if {'plus_di', 'minus_di', 'adx'}.issubset(df.columns):
+        df['trend_direction'] = np.sign(df['plus_di'] - df['minus_di'])
+        df['trend_confidence'] = (df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'] + 1e-9)
+        df['adx_turning'] = df['adx'].diff()
+
+    # 5) 通道 / 带宽 的触碰与 bars_since（修正：把所有语句放到 loop 内）
+    for prefix in ['bb', 'dc', 'kc']:
+        up_col = f'{prefix}_upper'
+        low_col = f'{prefix}_lower'
+        if (up_col in df.columns) and (low_col in df.columns):
+            df[f'{prefix}_touch_upper'] = (df['Close'] >= df[up_col]).astype(int)
+            df[f'{prefix}_touch_lower'] = (df['Close'] <= df[low_col]).astype(int)
+            df[f'{prefix}_bars_since_touch_upper'] = bars_since_event(df[f'{prefix}_touch_upper'] == 1)
+            df[f'{prefix}_bars_since_touch_lower'] = bars_since_event(df[f'{prefix}_touch_lower'] == 1)
+
+    # squeeze（bb 宽度处于过去 50 根的 10% 分位）
+    if 'bb_width' in df.columns:
+        df['squeeze'] = (df['bb_width'] <= df['bb_width'].rolling(50, min_periods=1).quantile(0.1)).astype(int)
+
+    # 6) 波动率特征
+    if ('hist_vol' in df.columns) and ('yz_vol' in df.columns):
+        df['vol_ratio'] = rolling_zscore(df['hist_vol'], 50) - rolling_zscore(df['yz_vol'], 50)
+        df['d_vol'] = df['hist_vol'].diff()
+
+    # 7) 斜率翻转
+    if 'slrs' in df.columns:
+        df['slope_flip'] = ((df['slrs'] > 0) & (df['slrs'].shift(1) <= 0)).astype(int)
+        df['bars_since_slope_flip'] = bars_since_event(df['slope_flip'] == 1)
+
+    # 8) Hurst 状态
+    if 'hurst' in df.columns:
+        df['hurst_state'] = np.where(df['hurst'] > 0.5, 1, np.where(df['hurst'] < 0.5, -1, 0))
+
+    # 9) 多窗口 Z-score & 百分位
+    cols = ['adx', 'macd_gap', 'bb_width', 'dc_width', 'kc_width', 'hist_vol']
+    for col in cols:
+        if col in df.columns:
+            for w in z_windows:
+                df[f'{col}_z{w}'] = rolling_zscore(df[col], w)
+                df[f'{col}_pct{w}'] = rolling_pct_rank(df[col], w)
+
+    # 10) 防信息泄露：把除 OHLCV 的所有派生列整体 shift(1)
+    protected = [c for c in df.columns if c.lower() in ('open', 'high', 'low', 'close', 'volume')]
+    feature_cols = [c for c in df.columns if c not in protected]
+    df[feature_cols] = df[feature_cols].shift(1)
+
+    return df
 
 
 

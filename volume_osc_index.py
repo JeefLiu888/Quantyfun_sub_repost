@@ -1,6 +1,11 @@
 import pandas as pd
 import numpy as np
 
+"""
+vol_osc
+volume_relative_strength
+vwap_deviation
+"""
 
 def VolumeOscillator(df, short_period=5, long_period=20, volume_col="Volume"):
     '''
@@ -65,9 +70,26 @@ def VWAPDeviation(df, period=20, high_col="High", low_col="Low",
     vwap = vwap_numerator / vwap_denominator
 
     # 偏离度
-    df['vwap'] = vwap
     df['vwap_deviation'] = (close - vwap) / vwap * 100
 
     return df
+
+
+def VolumeRateOfChange(df, period=12, volume_col="Volume"):
+    '''
+    计算Volume Rate of Change
+    :param df: 必须包含 [volume_col] 的 pandas DataFrame
+    :param period: 计算周期 (默认 12)
+    :param volume_col: 成交量列 (默认 'Volume')
+    :return: df
+    '''
+    volume = df[volume_col]
+
+    # Volume ROC
+    df['volume_roc'] = ((volume - volume.shift(period)) / volume.shift(period)) * 100
+    df['volume_roc'] = df['volume_roc'].fillna(0)
+
+    return df
+
 
 

@@ -1,8 +1,14 @@
 import pandas as pd
 import numpy as np
 
+"""
+测试后保留参数
+runs_test
+ljung_box
+variance_ratio
+"""
 
-def AutoCorrelation(df, lags=20, src_col="Close"):
+def AutoCorrelation(df,period = 50, lags=20, src_col="Close"):
     '''
     计算自相关系数
     :param df: 必须包含 [src_col] 的 pandas DataFrame
@@ -13,7 +19,7 @@ def AutoCorrelation(df, lags=20, src_col="Close"):
     src = df[src_col]
 
     for lag in range(1, lags + 1):
-        df[f'autocorr_{lag}'] = src.rolling(50).apply(
+        df[f'autocorr_{lag}'] = src.rolling(period).apply(
             lambda x: x.autocorr(lag=lag) if len(x) > lag else np.nan
         )
 
