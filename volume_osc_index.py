@@ -7,6 +7,8 @@ volume_relative_strength
 vwap_deviation
 """
 
+
+
 def VolumeOscillator(df, short_period=5, long_period=20, volume_col="Volume"):
     '''
     计算Volume Oscillator
@@ -23,7 +25,7 @@ def VolumeOscillator(df, short_period=5, long_period=20, volume_col="Volume"):
     short_ma = volume.rolling(short_period).mean()
     long_ma = volume.rolling(long_period).mean()
 
-    df['vol_osc'] = ((short_ma - long_ma) / long_ma) * 100
+    df[f'vol_osc_short{short_period}_long{long_period}'] = ((short_ma - long_ma) / long_ma) * 100
 
     return df
 

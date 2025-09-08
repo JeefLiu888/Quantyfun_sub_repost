@@ -231,16 +231,11 @@ def BollingerBandWidth(df, period=20, std_dev=2, src_col="Close"):
     return df
 
 
-def DonchianChannelWidth(df, period=20, high_col="High", low_col="Low", close_col="Close"):
-    '''
-    计算Donchian Channel宽度
-    :param df: 必须包含 [high_col, low_col, close_col] 的 pandas DataFrame
-    :param period: 通道周期 (默认 20)
-    :return: df
-    通道宽度扩张：趋势开始
-    通道宽度收缩：震荡整理
-    价格突破通道：趋势确认
-    '''
+def DonchianChannelFeatures(df, period=20, high_col="High", low_col="Low", close_col="Close"):
+    """
+    Donchian Channel 特征集
+    包含：通道宽度、宽度变化、相对位置、突破事件、突破强度、趋势强度
+    """
     high = df[high_col]
     low = df[low_col]
     close = df[close_col]
@@ -249,33 +244,59 @@ def DonchianChannelWidth(df, period=20, high_col="High", low_col="Low", close_co
     df['dc_lower'] = low.rolling(period).min()
     df['dc_middle'] = (df['dc_upper'] + df['dc_lower']) / 2
     df['dc_width'] = (df['dc_upper'] - df['dc_lower']) / close
+    df['dc_width_change'] = df['dc_width'].diff()
     df['dc_percent'] = (close - df['dc_lower']) / (df['dc_upper'] - df['dc_lower'])
+
+    # 突破事件
+    df['dc_breakout_up'] = (close > df['dc_upper']).astype(int)
+    df['dc_breakout_down'] = (close < df['dc_lower']).astype(int)
+
+    # 突破强度（避免单纯布尔）
+    df['dc_breakout_strength'] = np.where(close > df['dc_upper'],
+                                          (close - df['dc_upper']) / df['dc_width'], 0)
+    df['dc_breakdown_strength'] = np.where(close < df['dc_lower'],
+                                           (df['dc_lower'] - close) / df['dc_width'], 0)
+
+    # 趋势强度（相对位置 × 宽度变化）
+    df['dc_trend_strength'] = (df['dc_percent'] - 0.5) * df['dc_width_change']
 
     return df
 
 
-def KeltnerChannelWidth(df, period=20, atr_period=14, multiplier=2,
-                        high_col="High", low_col="Low", close_col="Close"):
-    '''
-    计算Keltner Channel宽度
-    :param df: 必须包含 [high_col, low_col, close_col] 的 pandas DataFrame
-    :param period: EMA周期 (默认 20)
-    :param atr_period: ATR周期 (默认 14)
-    :param multiplier: ATR倍数 (默认 2)
-    :return: df
-    '''
+def KeltnerChannelFeatures(df, period=20, atr_period=14, multiplier=2,
+                           high_col="High", low_col="Low", close_col="Close"):
+    """
+    Keltner Channel 特征集
+    包含：通道宽度、宽度变化、相对位置、突破事件、突破强度、趋势强度
+    """
     close = df[close_col]
 
-    # 计算ATR
+    # 计算ATR（假设你已有 ATR 函数）
     df = ATR(df, atr_period, high_col, low_col, close_col)
 
     ema = close.ewm(span=period).mean()
     df['kc_upper'] = ema + (df['atr'] * multiplier)
     df['kc_lower'] = ema - (df['atr'] * multiplier)
+
     df['kc_width'] = (df['kc_upper'] - df['kc_lower']) / close
+    df['kc_width_change'] = df['kc_width'].diff()
     df['kc_percent'] = (close - df['kc_lower']) / (df['kc_upper'] - df['kc_lower'])
 
+    # 突破事件
+    df['kc_breakout_up'] = (close > df['kc_upper']).astype(int)
+    df['kc_breakout_down'] = (close < df['kc_lower']).astype(int)
+
+    # 突破强度
+    df['kc_breakout_strength'] = np.where(close > df['kc_upper'],
+                                          (close - df['kc_upper']) / df['kc_width'], 0)
+    df['kc_breakdown_strength'] = np.where(close < df['kc_lower'],
+                                           (df['kc_lower'] - close) / df['kc_width'], 0)
+
+    # 趋势强度（相对位置 × 宽度变化）
+    df['kc_trend_strength'] = (df['kc_percent'] - 0.5) * df['kc_width_change']
+
     return df
+
 
 
 def HistoricalVolatility(df, period=20, annualize=252, src_col="Close"):
@@ -405,13 +426,13 @@ def build_features(df,
 
     df = df.copy()
 
-    # 1) 计算你已有的基础指标（确保这些函数在脚本中已定义并使用相同列名）
+    # 1) 算已有ta（确保这些函数在脚本中已定义并使用相同列名）
     df = ADX(df, di_len=adx_len, adx_period=adx_smooth)
     df = MACD(df, fast_length=macd_fast, slow_length=macd_slow, signal_length=macd_signal)
     df = ATR(df, period=atr_len)
     df = BollingerBandWidth(df, period=bb_len, std_dev=bb_std)
-    df = DonchianChannelWidth(df, period=dc_len)
-    df = KeltnerChannelWidth(df, period=kc_len, atr_period=atr_len)
+    df = DonchianChannelFeatures(df, period=dc_len)
+    df = KeltnerChannelFeatures(df, period=kc_len, atr_period=atr_len)
     df = HurstExponent(df, period=100)
     df = LinearRegressionSlope(df)
     df = HistoricalVolatility(df)
@@ -443,7 +464,7 @@ def build_features(df,
         df['trend_confidence'] = (df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'] + 1e-9)
         df['adx_turning'] = df['adx'].diff()
 
-    # 5) 通道 / 带宽 的触碰与 bars_since（修正：把所有语句放到 loop 内）
+    # 5) 通道 / 带宽 的触碰与 bars_since
     for prefix in ['bb', 'dc', 'kc']:
         up_col = f'{prefix}_upper'
         low_col = f'{prefix}_lower'
@@ -485,6 +506,5 @@ def build_features(df,
     df[feature_cols] = df[feature_cols].shift(1)
 
     return df
-
 
 

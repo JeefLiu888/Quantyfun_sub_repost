@@ -3,27 +3,40 @@ import numpy as np
 import statistic_index
 import matplotlib.pyplot as plt
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from sklearn.preprocessing import StandardScaler
+
 
 data = pd.read_csv('BTC_data.csv')
 
 df = data.copy()
 
+
+
+
+
+
 statistic_index.RunsTest(df,period=25)
-#statistic_index.KPSSTest(df,period=30)
+statistic_index.KPSSTest(df,period=30)
 statistic_index.LjungBoxTest(df,period=35)
 #statistic_index.AutoCorrelation(df, period=40)
 statistic_index.VarianceRatio(df)
 
 df.to_csv('test_df.csv')
 
-
-
-
+####### standard z-score ##############33
 factor_cols = [col for col in df.columns if col not in ["Date", "Adj close", "Close", "High", "Low", "Open", "Volume", "OHLC"]]
 
 df_factors = df[factor_cols]
+
+# 去除全空列与常数列
 df_factors = df_factors.dropna(how="all", axis=1)
-df_factors = df_factors.loc[:, df_factors.std() > 0]   # 去掉常数列
+df_factors = df_factors.loc[:, df_factors.std() > 0]
+
+# 标准化因子数据
+scaler = StandardScaler()
+df_factors_scaled = pd.DataFrame(scaler.fit_transform(df_factors), columns=df_factors.columns, index=df_factors.index)
+
+
 
 
 def correlation_filter(df, threshold=0.8):

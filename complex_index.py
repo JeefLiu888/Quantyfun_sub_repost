@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-
+from statsmodels import stats
 
 def DominantCyclePeriod(df, period=50, src_col="Close"):
     '''

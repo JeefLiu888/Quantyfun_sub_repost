@@ -59,15 +59,15 @@ def load_data(ticker_name, start, end, interval):
 
 test_ticker = 'BTC'
 
-test_df = load_data(test_ticker, start= '2023-01-01', end = date.today(), interval= '1d')
+test_df = load_data(test_ticker, start= '2020-01-01', end = date.today(), interval= '1d')
 test_df.to_csv(f'test_df_{test_ticker}')
 
 
-Basic_indicator.UT_BOT_alerts(test_df,a=2,atr_period=1,use_heikin= False)
-Basic_indicator.ADX(test_df,14,14)
+#Basic_indicator.UT_BOT_alerts(test_df,a=2,atr_period=1,use_heikin= False)
+#Basic_indicator.ADX(test_df,14,14)
 
-trend_strength_index.AroonOscillator(test_df)
-trend_strength_index.MACD(test_df)
+#trend_strength_index.AroonOscillator(test_df)
+#trend_strength_index.MACD(test_df)
 
 test_df.to_csv('test_df_result.csv')
 #print(test_df)

@@ -9,19 +9,19 @@ data = pd.read_csv('BTC_data.csv')
 df = data.copy()
 
 
-#volume_osc_index.VolumeRateOfChange(df)
-volume_osc_index.VolumeOscillator(df)
+
+
+
+volume_osc_index.VolumeRateOfChange(df)
+volume_osc_index.VolumeOscillator(df, short_period=10, long_period=20)
 volume_osc_index.VolumeRelativeStrength(df)
 volume_osc_index.VWAPDeviation(df)
-
-
-
 df.to_csv('test_df.csv')
 
 
 
 
-factor_cols = [col for col in df.columns if col not in ["Date", "Adj close", "Close", "High", "Low", "Open", "Volume", "OHLC"]]
+factor_cols = [col for col in df.columns if col not in ['Unnamed: 0',"Date", "Adj close", "Close", "High", "Low", "Open", "Volume", "OHLC"]]
 
 df_factors = df[factor_cols]
 df_factors = df_factors.dropna(how="all", axis=1)
@@ -54,7 +54,7 @@ plt.xticks(range(len(corr_matrix.columns)), corr_matrix.columns, rotation=90)
 plt.yticks(range(len(corr_matrix.columns)), corr_matrix.columns)
 plt.title("Factor Correlation Heatmap")
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 
 
